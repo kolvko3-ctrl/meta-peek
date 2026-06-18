@@ -1,10 +1,10 @@
 """
 Dota 2 meta — STRATZ GraphQL API.
 
-Правильный синтаксис (из рабочего GitHub проекта):
-  heroStats { winWeek(bracketIds: [GUARDIAN], positionIds: [POSITION_1]) { heroId matchCount winCount } }
+winWeek возвращает данные за каждую неделю отдельно (take=N недель).
+Нужно агрегировать: суммировать matchCount и winCount по heroId.
 
-STRATZ_TOKEN обязателен — получи бесплатно на stratz.com/api
+Используем take: 1 чтобы взять только последнюю неделю — самые актуальные данные.
 """
 
 import os
@@ -12,6 +12,7 @@ import json
 import aiohttp
 import logging
 from time import time
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +71,11 @@ async def _query_stratz(session, token, names, position, rank):
     pos = POSITION_ENUM.get(position, "POSITION_1")
     bracket_str = ", ".join(brackets)
 
+    # take: 1 = только последняя неделя (самые актуальные данные, без дублей)
     query = """{
   heroStats {
     winWeek(
+      take: 1
       bracketIds: [%s]
       positionIds: [%s]
     ) {
@@ -103,19 +106,15 @@ async def _query_stratz(session, token, names, position, rank):
         logger.info(f"STRATZ ← status={status} len={len(raw)}")
 
     if status == 401:
-        raise RuntimeError("STRATZ: токен недействителен (401). Обнови на stratz.com/api")
+        raise RuntimeError("STRATZ токен недействителен (401). Обнови на stratz.com/api")
     if status == 403:
-        raise RuntimeError(
-            f"STRATZ вернул 403 Forbidden.\n"
-            f"Токен: {'задан (' + str(len(token)) + ' символов)' if token else 'НЕ ЗАДАН'}\n"
-            f"Ответ: {raw[:150]}"
-        )
+        raise RuntimeError(f"STRATZ 403 Forbidden. Токен: {'задан' if token else 'НЕ ЗАДАН'}")
     if status != 200:
         raise RuntimeError(f"STRATZ HTTP {status}: {raw[:200]}")
 
     try:
         body = json.loads(raw)
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
         raise RuntimeError(f"STRATZ вернул не-JSON (status={status}): {raw[:200]}")
 
     errors = body.get("errors")
@@ -123,29 +122,43 @@ async def _query_stratz(session, token, names, position, rank):
         raise RuntimeError(f"STRATZ GraphQL: {errors[0].get('message', str(errors))}")
 
     rows = (body.get("data") or {}).get("heroStats", {}).get("winWeek") or []
-    logger.info(f"STRATZ вернул {len(rows)} героев")
+    logger.info(f"STRATZ вернул {len(rows)} строк")
 
     if not rows:
         raise ValueError("STRATZ вернул пустой список — попробуй другой ранг")
 
-    total = sum(r.get("matchCount") or 0 for r in rows)
-    out = []
+    # Агрегируем по heroId (на случай если take>1 вернёт несколько недель)
+    agg = defaultdict(lambda: {"wins": 0, "matches": 0})
     for r in rows:
         hid = r.get("heroId")
-        wins = r.get("winCount") or 0
-        matches = r.get("matchCount") or 0
+        if hid is None:
+            continue
+        agg[hid]["wins"]    += r.get("winCount", 0) or 0
+        agg[hid]["matches"] += r.get("matchCount", 0) or 0
+
+    total_matches = sum(v["matches"] for v in agg.values())
+
+    out = []
+    for hid, stats in agg.items():
+        matches = stats["matches"]
+        wins    = stats["wins"]
         if matches < 50:
             continue
         out.append({
             "hero_id": hid,
             "localized_name": names.get(hid, f"Hero #{hid}"),
-            "winrate": round(wins / matches * 100, 2),
-            "picks": matches,
-            "pickrate": round(matches / total * 100, 2) if total else 0,
+            "winrate":  round(wins / matches * 100, 2),
+            "picks":    matches,
+            "pickrate": round(matches / total_matches * 100, 2) if total_matches else 0,
         })
 
     out.sort(key=lambda x: x["winrate"], reverse=True)
-    return out[:10]
+    top = out[:10]
+
+    logger.info("Топ-3: " + ", ".join(
+        f"{h['localized_name']} {h['winrate']:.1f}%" for h in top[:3]
+    ))
+    return top
 
 
 async def _get_hero_names(session, token) -> dict:
@@ -167,17 +180,16 @@ async def _get_hero_names(session, token) -> dict:
 
     try:
         q = "{ constants { heroes { id displayName } } }"
-        headers = {
+        h = {
             "Content-Type": "application/json",
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
         }
         async with session.post(
             STRATZ_API, data=json.dumps({"query": q}),
-            headers=headers, timeout=aiohttp.ClientTimeout(total=10),
+            headers=h, timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
-            raw = await resp.text()
-            body = json.loads(raw)
+            body = json.loads(await resp.text())
         heroes = body.get("data", {}).get("constants", {}).get("heroes") or []
         _hero_names = {h["id"]: h["displayName"] for h in heroes if h.get("id")}
         logger.info(f"Загружено {len(_hero_names)} имён из STRATZ")
