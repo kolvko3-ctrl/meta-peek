@@ -16,11 +16,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 POSITION_NAMES = {
-    "1": "Carry (Pos 1)",
-    "2": "Mid (Pos 2)",
-    "3": "Offlane (Pos 3)",
-    "4": "Soft Support (Pos 4)",
-    "5": "Hard Support (Pos 5)",
+    "1": "Carry",
+    "2": "Mid",
+    "3": "Offlane",
+    "4": "Soft Support",
+    "5": "Hard Support",
 }
 
 POSITION_EMOJIS = {
@@ -31,95 +31,123 @@ POSITION_EMOJIS = {
     "5": "💚",
 }
 
+RANK_NAMES = {
+    "herald":   "Herald",
+    "guardian": "Guardian",
+    "crusader": "Crusader",
+    "archon":   "Archon",
+    "legend":   "Legend",
+    "ancient":  "Ancient",
+    "divine":   "Divine",
+    "immortal": "Immortal",
+    "all":      "Все ранги",
+}
+
 RANK_EMOJIS = {
-    "herald": "🥉",
-    "guardian": "🥈",
-    "crusader": "🏅",
-    "archon": "🌟",
-    "legend": "💫",
-    "ancient": "🔶",
-    "divine": "💠",
+    "herald":   "⚪",
+    "guardian": "🟢",
+    "crusader": "🟡",
+    "archon":   "🟠",
+    "legend":   "🔵",
+    "ancient":  "🟣",
+    "divine":   "💠",
     "immortal": "👑",
-    "all": "🌍",
+    "all":      "🌍",
 }
 
 
+# ─── Keyboards ────────────────────────────────────────────────────────────────
+
+def build_position_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⚔️ Carry (1)", callback_data="pos_1"),
+            InlineKeyboardButton("🔮 Mid (2)",   callback_data="pos_2"),
+        ],
+        [
+            InlineKeyboardButton("🛡️ Offlane (3)",    callback_data="pos_3"),
+            InlineKeyboardButton("🎯 Soft Sup (4)", callback_data="pos_4"),
+        ],
+        [
+            InlineKeyboardButton("💚 Hard Sup (5)", callback_data="pos_5"),
+        ],
+    ])
+
+
+def build_rank_keyboard(position: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🌍 Все ранги",  callback_data=f"rank_{position}_all"),
+            InlineKeyboardButton("👑 Immortal",   callback_data=f"rank_{position}_immortal"),
+        ],
+        [
+            InlineKeyboardButton("💠 Divine",     callback_data=f"rank_{position}_divine"),
+            InlineKeyboardButton("🟣 Ancient",    callback_data=f"rank_{position}_ancient"),
+        ],
+        [
+            InlineKeyboardButton("🔵 Legend",     callback_data=f"rank_{position}_legend"),
+            InlineKeyboardButton("🟠 Archon",     callback_data=f"rank_{position}_archon"),
+        ],
+        [
+            InlineKeyboardButton("🟡 Crusader",   callback_data=f"rank_{position}_crusader"),
+            InlineKeyboardButton("🟢 Guardian",   callback_data=f"rank_{position}_guardian"),
+        ],
+        [
+            InlineKeyboardButton("◀️ Назад к позициям", callback_data="back_to_positions"),
+        ],
+    ])
+
+
+def build_result_keyboard(position: str, rank: str, cb_data: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🔄 Обновить",         callback_data=cb_data),
+            InlineKeyboardButton("◀️ Сменить ранг",     callback_data=f"pos_{position}"),
+        ],
+        [
+            InlineKeyboardButton("🏠 Главное меню",      callback_data="back_to_positions"),
+        ],
+    ])
+
+
+# ─── Handlers ─────────────────────────────────────────────────────────────────
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    welcome_text = (
-        f"👋 Привет, <b>{user.first_name}</b>!\n\n"
-        "🎮 <b>Dota 2 Meta Bot</b> — твой гид по актуальной мете!\n\n"
-        "📊 Я покажу топ-10 героев на любую позицию прямо сейчас, "
-        "используя данные OpenDota.\n\n"
+    name = update.effective_user.first_name
+    text = (
+        f"👋 Привет, <b>{name}</b>!\n\n"
+        "🎮 <b>Dota 2 Meta Bot</b>\n"
+        "Показываю топ-10 героев по позиции с актуальным winrate и pickrate.\n\n"
+        "Данные берутся из <b>OpenDota</b> в реальном времени.\n\n"
         "Выбери свою позицию 👇"
     )
-    keyboard = build_position_keyboard()
+    await update.message.reply_text(text, parse_mode="HTML",
+                                    reply_markup=build_position_keyboard())
+
+
+async def meta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        welcome_text, parse_mode="HTML", reply_markup=keyboard
+        "🎮 <b>Выбери позицию:</b>",
+        parse_mode="HTML",
+        reply_markup=build_position_keyboard(),
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    help_text = (
-        "ℹ️ <b>Как пользоваться ботом:</b>\n\n"
-        "1️⃣ Нажми /start или /meta\n"
-        "2️⃣ Выбери свою позицию (1–5)\n"
-        "3️⃣ Выбери ранг (или все ранги)\n"
-        "4️⃣ Получи топ-10 героев с актуальной статистикой!\n\n"
+    text = (
+        "ℹ️ <b>Как пользоваться:</b>\n\n"
+        "/start или /meta — открыть бота\n\n"
+        "<b>Шаги:</b>\n"
+        "1️⃣ Выбери позицию (1–5)\n"
+        "2️⃣ Выбери ранг\n"
+        "3️⃣ Получи топ-10 героев!\n\n"
         "<b>Что показывает бот:</b>\n"
-        "• 🏆 Место в топе\n"
-        "• 📈 Winrate (% побед)\n"
-        "• 🎯 Pickrate (% пиков)\n\n"
-        "Данные обновляются каждые несколько часов через OpenDota API."
+        "📈 Winrate — % побед на этой позиции\n"
+        "🎯 Pickrate — % от всех пиков в ранге\n"
+        "🔥 Индикатор силы героя\n\n"
+        "Данные: OpenDota API • Кэш: 30 мин"
     )
-    await update.message.reply_text(help_text, parse_mode="HTML")
-
-
-async def meta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    keyboard = build_position_keyboard()
-    await update.message.reply_text(
-        "🎮 <b>Выбери свою позицию:</b>",
-        parse_mode="HTML",
-        reply_markup=keyboard,
-    )
-
-
-def build_position_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [
-        [
-            InlineKeyboardButton("⚔️ Carry (Pos 1)", callback_data="pos_1"),
-            InlineKeyboardButton("🔮 Mid (Pos 2)", callback_data="pos_2"),
-        ],
-        [
-            InlineKeyboardButton("🛡️ Offlane (Pos 3)", callback_data="pos_3"),
-            InlineKeyboardButton("🎯 Soft Sup (Pos 4)", callback_data="pos_4"),
-        ],
-        [
-            InlineKeyboardButton("💚 Hard Sup (Pos 5)", callback_data="pos_5"),
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def build_rank_keyboard(position: str) -> InlineKeyboardMarkup:
-    keyboard = [
-        [
-            InlineKeyboardButton("🌍 Все ранги", callback_data=f"rank_{position}_all"),
-            InlineKeyboardButton("👑 Immortal", callback_data=f"rank_{position}_immortal"),
-        ],
-        [
-            InlineKeyboardButton("💠 Divine", callback_data=f"rank_{position}_divine"),
-            InlineKeyboardButton("🔶 Ancient", callback_data=f"rank_{position}_ancient"),
-        ],
-        [
-            InlineKeyboardButton("💫 Legend", callback_data=f"rank_{position}_legend"),
-            InlineKeyboardButton("🌟 Archon", callback_data=f"rank_{position}_archon"),
-        ],
-        [
-            InlineKeyboardButton("◀️ Назад", callback_data="back_to_positions"),
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text, parse_mode="HTML")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -127,121 +155,118 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     data = query.data
 
+    # ── Main menu
     if data == "back_to_positions":
-        keyboard = build_position_keyboard()
         await query.edit_message_text(
-            "🎮 <b>Выбери свою позицию:</b>",
+            "🎮 <b>Выбери позицию:</b>",
             parse_mode="HTML",
-            reply_markup=keyboard,
+            reply_markup=build_position_keyboard(),
         )
         return
 
+    # ── Position selected → show rank picker
     if data.startswith("pos_"):
-        position = data.split("_")[1]
-        pos_name = POSITION_NAMES[position]
-        pos_emoji = POSITION_EMOJIS[position]
-        keyboard = build_rank_keyboard(position)
+        position = data[4:]
+        emoji = POSITION_EMOJIS[position]
+        name  = POSITION_NAMES[position]
         await query.edit_message_text(
-            f"{pos_emoji} <b>{pos_name}</b>\n\nТеперь выбери свой ранг 👇",
+            f"{emoji} <b>{name} (Pos {position})</b>\n\nВыбери ранг 👇",
             parse_mode="HTML",
-            reply_markup=keyboard,
+            reply_markup=build_rank_keyboard(position),
         )
         return
 
+    # ── Rank selected → fetch and show heroes
     if data.startswith("rank_"):
-        parts = data.split("_")
-        position = parts[1]
-        rank = parts[2]
+        _, position, rank = data.split("_", 2)
+        pos_emoji   = POSITION_EMOJIS[position]
+        pos_name    = POSITION_NAMES[position]
+        rank_emoji  = RANK_EMOJIS.get(rank, "🌍")
+        rank_name   = RANK_NAMES.get(rank, rank.capitalize())
 
-        pos_name = POSITION_NAMES[position]
-        pos_emoji = POSITION_EMOJIS[position]
-        rank_emoji = RANK_EMOJIS.get(rank, "🌍")
-
-        loading_text = (
-            f"{pos_emoji} <b>{pos_name}</b> | {rank_emoji} <b>{rank.capitalize()}</b>\n\n"
-            "⏳ Загружаю данные с OpenDota..."
+        # Show loading
+        await query.edit_message_text(
+            f"{pos_emoji} <b>{pos_name}</b>  |  {rank_emoji} <b>{rank_name}</b>\n\n"
+            "⏳ Загружаю данные из OpenDota...",
+            parse_mode="HTML",
         )
-        await query.edit_message_text(loading_text, parse_mode="HTML")
 
         try:
             heroes = await get_top_heroes(position, rank)
-            response = format_heroes_response(heroes, position, rank)
+            text = format_response(heroes, position, rank)
         except Exception as e:
-            logger.error(f"Error fetching heroes: {e}")
-            response = "❌ Ошибка при получении данных. Попробуй чуть позже."
-
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🔄 Обновить", callback_data=data),
-                InlineKeyboardButton("◀️ Назад", callback_data=f"pos_{position}"),
-            ],
-            [
-                InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_positions"),
-            ],
-        ])
+            logger.error(f"Error: {e}")
+            text = (
+                "❌ Не удалось получить данные от OpenDota.\n"
+                "Попробуй позже или нажми «Обновить»."
+            )
 
         await query.edit_message_text(
-            response, parse_mode="HTML", reply_markup=keyboard
+            text,
+            parse_mode="HTML",
+            reply_markup=build_result_keyboard(position, rank, data),
         )
 
 
-def format_heroes_response(heroes: list, position: str, rank: str) -> str:
-    pos_name = POSITION_NAMES[position]
-    pos_emoji = POSITION_EMOJIS[position]
-    rank_emoji = RANK_EMOJIS.get(rank, "🌍")
-    rank_name = rank.capitalize() if rank != "all" else "Все ранги"
+# ─── Formatting ───────────────────────────────────────────────────────────────
 
-    medals = ["🥇", "🥈", "🥉"]
+MEDALS = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "🔟"]
+
+def wr_bar(winrate: float) -> str:
+    if winrate >= 57:  return "🔥🔥🔥"
+    if winrate >= 54:  return "🔥🔥"
+    if winrate >= 51:  return "🔥"
+    if winrate >= 49:  return "⚖️"
+    return "📉"
+
+def format_response(heroes: list, position: str, rank: str) -> str:
+    pos_emoji  = POSITION_EMOJIS[position]
+    pos_name   = POSITION_NAMES[position]
+    rank_emoji = RANK_EMOJIS.get(rank, "🌍")
+    rank_name  = RANK_NAMES.get(rank, rank.capitalize())
+
     lines = [
-        f"{pos_emoji} <b>Топ-10 героев — {pos_name}</b>",
-        f"{rank_emoji} Ранг: <b>{rank_name}</b>\n",
-        "━━━━━━━━━━━━━━━━━━━",
+        f"{pos_emoji} <b>Топ героев — {pos_name} (Pos {position})</b>",
+        f"{rank_emoji} Ранг: <b>{rank_name}</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
     ]
 
-    for i, hero in enumerate(heroes[:10], start=1):
-        medal = medals[i - 1] if i <= 3 else f"{i}."
-        name = hero["localized_name"]
-        winrate = hero["winrate"]
-        pickrate = hero.get("pickrate", 0)
+    if not heroes:
+        lines.append("😔 Данных недостаточно для этого фильтра.")
+    else:
+        for i, h in enumerate(heroes):
+            medal    = MEDALS[i] if i < len(MEDALS) else f"{i+1}."
+            name     = h["localized_name"]
+            winrate  = h["winrate"]
+            pickrate = h.get("pickrate", 0)
+            bar      = wr_bar(winrate)
 
-        wr_bar = get_winrate_bar(winrate)
+            lines.append(
+                f"{medal} <b>{name}</b>\n"
+                f"   📈 WR: <b>{winrate:.1f}%</b> {bar}   🎯 Pick: {pickrate:.1f}%"
+            )
 
-        lines.append(
-            f"{medal} <b>{name}</b>\n"
-            f"   📈 WR: <b>{winrate:.1f}%</b> {wr_bar}  🎯 Pick: {pickrate:.1f}%"
-        )
-
-    lines.append("━━━━━━━━━━━━━━━━━━━")
-    lines.append("🕐 Данные: <i>OpenDota API (реальное время)</i>")
+    lines += [
+        "━━━━━━━━━━━━━━━━━━━━",
+        "🕐 <i>Источник: OpenDota API</i>",
+    ]
     return "\n".join(lines)
 
 
-def get_winrate_bar(winrate: float) -> str:
-    if winrate >= 56:
-        return "🔥🔥🔥"
-    elif winrate >= 53:
-        return "🔥🔥"
-    elif winrate >= 51:
-        return "🔥"
-    elif winrate >= 49:
-        return "⚖️"
-    else:
-        return "📉"
-
+# ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
-        raise ValueError("TELEGRAM_BOT_TOKEN не задан!")
+        raise ValueError("Задай переменную окружения TELEGRAM_BOT_TOKEN")
 
     app = Application.builder().token(token).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("meta", meta_command))
+    app.add_handler(CommandHandler("meta",  meta_command))
+    app.add_handler(CommandHandler("help",  help_command))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
-    logger.info("Бот запущен!")
+    logger.info("Бот запущен ✅")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
