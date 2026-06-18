@@ -194,33 +194,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         try:
             heroes = await get_top_heroes(position, rank)
             text = format_response(heroes, position, rank)
-        except RuntimeError as e:
-            logger.error(f"Runtime error: {e}")
-            msg = str(e)
-            if "STRATZ_TOKEN" in msg:
-                text = (
-                    "⚙️ <b>Требуется настройка бота</b>\n\n"
-                    "Для работы нужен бесплатный токен STRATZ:\n\n"
-                    "1. Зайди на <a href='https://stratz.com/api'>stratz.com/api</a>\n"
-                    "2. Войди через Steam\n"
-                    "3. Скопируй свой токен\n"
-                    "4. В Railway Variables добавь:\n"
-                    "<code>STRATZ_TOKEN = твой_токен</code>\n\n"
-                    "Это бесплатно и занимает 2 минуты ✅"
-                )
-            elif "токен" in msg.lower() or "401" in msg:
-                text = (
-                    "🔑 <b>STRATZ токен недействителен</b>\n\n"
-                    "Обнови токен на <a href='https://stratz.com/api'>stratz.com/api</a> "
-                    "и пропиши заново в Railway Variables."
-                )
-            else:
-                text = f"❌ Ошибка: {msg}\n\nПопробуй позже или нажми «Обновить»."
         except Exception as e:
-            logger.error(f"Error: {e}")
+            import traceback
+            err_detail = traceback.format_exc()
+            logger.error(f"Ошибка получения данных:\n{err_detail}")
+            # Показываем полную ошибку прямо в боте для отладки
+            short = str(e)[:300]
             text = (
-                "❌ Не удалось получить данные.\n"
-                "Попробуй позже или нажми «Обновить»."
+                f"❌ <b>Ошибка (debug):</b>\n"
+                f"<code>{short}</code>\n\n"
+                f"Тип: <code>{type(e).__name__}</code>"
             )
 
         await query.edit_message_text(
