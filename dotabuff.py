@@ -1,13 +1,25 @@
 """
-Dota 2 meta data — STRATZ GraphQL API.
+Dota 2 meta — STRATZ GraphQL API.
 
-STRATZ требует токен. Без него API возвращает 401.
-Токен бесплатный: зайди на https://stratz.com/api → войди через Steam → скопируй токен.
-Добавь его в Railway как переменную: STRATZ_TOKEN=eyJ...
+Правильный синтаксис запроса (из реального рабочего проекта на GitHub):
+  heroStats {
+    winWeek(
+      bracketIds: [GUARDIAN, ARCHON],
+      positionIds: [POSITION_1],
+      gameModeIds: [ALL_PICK_RANKED]
+    ) {
+      heroId
+      matchCount
+      winCount
+    }
+  }
 
-STRATZ positionIds: 1=Carry, 2=Mid, 3=Offlane, 4=Soft Support, 5=Hard Support
-STRATZ bracketIds:  1=Herald, 2=Guardian, 3=Crusader, 4=Archon,
-                    5=Legend, 6=Ancient, 7=Divine, 8=Immortal
+ВАЖНО:
+  - bracketIds = enum строки: HERALD, GUARDIAN, CRUSADER, ARCHON, LEGEND, ANCIENT, DIVINE, IMMORTAL
+  - positionIds = enum строки: POSITION_1 .. POSITION_5
+  - gameModeIds = enum: ALL_PICK_RANKED (22) или просто не указываем
+  - endpoint: winWeek (не stats!)
+  - токен: Bearer в заголовке Authorization
 """
 
 import os
@@ -19,45 +31,38 @@ logger = logging.getLogger(__name__)
 
 STRATZ_API = "https://api.stratz.com/graphql"
 
-BRACKET_MAP = {
-    "herald":   [1],
-    "guardian": [2],
-    "crusader": [3],
-    "archon":   [4],
-    "legend":   [5],
-    "ancient":  [6],
-    "divine":   [7],
-    "immortal": [8],
-    "all":      [1, 2, 3, 4, 5, 6, 7, 8],
+# Enum значения для STRATZ API (строки, не числа!)
+BRACKET_ENUM = {
+    "herald":   ["HERALD"],
+    "guardian": ["GUARDIAN"],
+    "crusader": ["CRUSADER"],
+    "archon":   ["ARCHON"],
+    "legend":   ["LEGEND"],
+    "ancient":  ["ANCIENT"],
+    "divine":   ["DIVINE"],
+    "immortal": ["IMMORTAL"],
+    "all":      ["HERALD", "GUARDIAN", "CRUSADER", "ARCHON",
+                 "LEGEND", "ANCIENT", "DIVINE", "IMMORTAL"],
 }
 
-POSITION_MAP = {
-    "1": 1,  # Carry
-    "2": 2,  # Mid
-    "3": 3,  # Offlane
-    "4": 4,  # Soft Support
-    "5": 5,  # Hard Support
+POSITION_ENUM = {
+    "1": "POSITION_1",
+    "2": "POSITION_2",
+    "3": "POSITION_3",
+    "4": "POSITION_4",
+    "5": "POSITION_5",
 }
 
 _cache: dict = {}
 _hero_names: dict | None = None
-CACHE_TTL = 60 * 30
-
-
-def _get_token() -> str | None:
-    return os.environ.get("STRATZ_TOKEN")
+CACHE_TTL = 60 * 30  # 30 минут
 
 
 async def get_top_heroes(position: str, rank: str) -> list[dict]:
-    token = _get_token()
-    if not token:
-        raise RuntimeError(
-            "STRATZ_TOKEN не задан! Получи бесплатный токен на https://stratz.com/api "
-            "и добавь его в Railway Variables как STRATZ_TOKEN=eyJ..."
-        )
-
+    token = os.environ.get("STRATZ_TOKEN", "")
     key = f"{position}_{rank}"
     now = time()
+
     if key in _cache:
         ts, data = _cache[key]
         if now - ts < CACHE_TTL:
@@ -65,71 +70,72 @@ async def get_top_heroes(position: str, rank: str) -> list[dict]:
 
     async with aiohttp.ClientSession() as session:
         names = await _get_hero_names(session, token)
-        result = await _fetch_stratz(session, token, names, position, rank)
+        result = await _query_stratz(session, token, names, position, rank)
 
     _cache[key] = (now, result)
     return result
 
 
-async def _fetch_stratz(session, token, names, position, rank):
-    brackets = BRACKET_MAP.get(rank, [1, 2, 3, 4, 5, 6, 7, 8])
-    pos_id = POSITION_MAP.get(position, 1)
-    bracket_str = "[" + ",".join(str(b) for b in brackets) + "]"
+async def _query_stratz(session, token, names, position, rank):
+    brackets = BRACKET_ENUM.get(rank, ["HERALD","GUARDIAN","CRUSADER","ARCHON",
+                                        "LEGEND","ANCIENT","DIVINE","IMMORTAL"])
+    pos = POSITION_ENUM.get(position, "POSITION_1")
 
-    query = """
-    {
-      heroStats {
-        stats(
-          bracketIds: %s
-          positionIds: [%d]
-          gameModeIds: [22]
-        ) {
-          heroId
-          winCount
-          matchCount
-        }
-      }
-    }
-    """ % (bracket_str, pos_id)
+    bracket_str = ", ".join(brackets)
 
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-        "User-Agent": "Dota2MetaBot/1.0",
+    # Правильный запрос — winWeek с enum значениями
+    query = """{
+  heroStats {
+    winWeek(
+      bracketIds: [%s]
+      positionIds: [%s]
+    ) {
+      heroId
+      matchCount
+      winCount
     }
+  }
+}""" % (bracket_str, pos)
+
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    logger.info(f"STRATZ query: pos={pos} brackets=[{bracket_str}]")
 
     async with session.post(
         STRATZ_API,
-        json={"query": query.strip()},
+        json={"query": query},
         headers=headers,
         timeout=aiohttp.ClientTimeout(total=25),
     ) as resp:
-        if resp.status == 401:
-            raise RuntimeError(
-                "STRATZ токен недействителен или истёк. "
-                "Обнови токен на https://stratz.com/api"
-            )
-        resp.raise_for_status()
-        data = await resp.json()
+        status = resp.status
+        body = await resp.json()
 
-    if "errors" in data:
-        raise RuntimeError(f"STRATZ error: {data['errors']}")
+        if status == 401:
+            raise RuntimeError("STRATZ: токен недействителен (401). Обнови на stratz.com/api")
+        if status != 200:
+            raise RuntimeError(f"STRATZ HTTP {status}: {body}")
 
-    rows = data.get("data", {}).get("heroStats", {}).get("stats") or []
+    errors = body.get("errors")
+    if errors:
+        raise RuntimeError(f"STRATZ GraphQL ошибка: {errors[0].get('message', errors)}")
+
+    rows = (body.get("data") or {}).get("heroStats", {}).get("winWeek") or []
+    logger.info(f"STRATZ вернул {len(rows)} строк")
+
     if not rows:
-        raise ValueError("STRATZ вернул пустые данные")
-
-    logger.info(f"STRATZ: {len(rows)} героев для pos={position} rank={rank}")
+        raise ValueError("STRATZ вернул пустой список героев")
 
     total = sum(r.get("matchCount") or 0 for r in rows)
-    results = []
+    out = []
     for r in rows:
         hid = r.get("heroId")
         wins = r.get("winCount") or 0
         matches = r.get("matchCount") or 0
         if matches < 50:
             continue
-        results.append({
+        out.append({
             "hero_id": hid,
             "localized_name": names.get(hid, f"Hero #{hid}"),
             "winrate": round(wins / matches * 100, 2),
@@ -137,8 +143,8 @@ async def _fetch_stratz(session, token, names, position, rank):
             "pickrate": round(matches / total * 100, 2) if total else 0,
         })
 
-    results.sort(key=lambda x: x["winrate"], reverse=True)
-    return results[:10]
+    out.sort(key=lambda x: x["winrate"], reverse=True)
+    return out[:10]
 
 
 async def _get_hero_names(session, token) -> dict:
@@ -146,34 +152,34 @@ async def _get_hero_names(session, token) -> dict:
     if _hero_names:
         return _hero_names
 
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    }
-
-    # STRATZ constants
+    # OpenDota — стабильный источник имён
     try:
-        query = "{ constants { heroes { id displayName } } }"
+        async with session.get(
+            "https://api.opendota.com/api/heroes",
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            heroes = await resp.json()
+        _hero_names = {h["id"]: h["localized_name"] for h in heroes}
+        logger.info(f"Загружено {len(_hero_names)} имён из OpenDota")
+        return _hero_names
+    except Exception as e:
+        logger.warning(f"OpenDota hero names failed: {e}")
+
+    # Fallback: STRATZ constants
+    try:
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        q = "{ constants { heroes { id displayName } } }"
         async with session.post(
-            STRATZ_API,
-            json={"query": query},
-            headers=headers,
+            STRATZ_API, json={"query": q}, headers=headers,
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
             data = await resp.json()
         heroes = data.get("data", {}).get("constants", {}).get("heroes") or []
-        if heroes:
-            _hero_names = {h["id"]: h["displayName"] for h in heroes if h.get("id")}
-            logger.info(f"Загружено {len(_hero_names)} имён героев из STRATZ")
-            return _hero_names
+        _hero_names = {h["id"]: h["displayName"] for h in heroes if h.get("id")}
+        logger.info(f"Загружено {len(_hero_names)} имён из STRATZ")
+        return _hero_names
     except Exception as e:
         logger.warning(f"STRATZ hero names failed: {e}")
-
-    # Fallback: OpenDota
-    async with session.get(
-        "https://api.opendota.com/api/heroes",
-        timeout=aiohttp.ClientTimeout(total=10),
-    ) as resp:
-        heroes = await resp.json()
-    _hero_names = {h["id"]: h["localized_name"] for h in heroes}
-    return _hero_names
+        return {}
