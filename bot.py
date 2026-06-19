@@ -215,8 +215,8 @@ def _format_top(heroes: list, position: str, rank: str) -> str:
     return "\n".join(lines)
 
 def _format_build(hero_name: str, build: dict, position: str, rank: str) -> str:
-    def fmt(items: list) -> str:
-        return " • ".join(items) if items else "—"
+    def fmt_list(items: list) -> str:
+        return "\n".join(f"  • {item}" for item in items) if items else "  —"
 
     lines = [
         f"📖 <b>Билд — {hero_name}</b>",
@@ -224,20 +224,20 @@ def _format_build(hero_name: str, build: dict, position: str, rank: str) -> str:
         f"{RANK_EMOJIS.get(rank,'🌍')} {RANK_NAMES.get(rank, rank)}",
         "━━━━━━━━━━━━━━━━━━━━",
         "",
-        "🛍 <b>Стартовые айтемы:</b>",
-        fmt(build.get("starting_items", [])),
+        "🛍 <b>Старт (0–2 мин):</b>",
+        fmt_list(build.get("starting_items", [])),
         "",
-        "⚔️ <b>Корневые айтемы (core):</b>",
-        fmt(build.get("core_items", [])),
+        "⚔️ <b>Core айтемы (10–20 мин):</b>",
+        fmt_list(build.get("core_items", [])),
         "",
-        "💎 <b>Поздние айтемы:</b>",
-        fmt(build.get("late_items", [])),
+        "💎 <b>Late game (25+ мин):</b>",
+        fmt_list(build.get("late_items", [])),
         "",
         "🎯 <b>Скиллбилд (уровни 1–7):</b>",
-        *build.get("abilities", ["—"]),
+        *([f"  {ab}" for ab in build.get("abilities", [])] or ["  —"]),
         "",
         "━━━━━━━━━━━━━━━━━━━━",
-        "🕐 <i>Данные: OpenDota API</i>",
+        "🕐 <i>Данные: OpenDota API (реальные матчи)</i>",
     ]
     return "\n".join(lines)
 
