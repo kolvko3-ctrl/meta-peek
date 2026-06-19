@@ -37,45 +37,44 @@ def kb_positions() -> InlineKeyboardMarkup:
     ])
 
 def kb_ranks(position: str) -> InlineKeyboardMarkup:
+    p = position
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌍 Все ранги", callback_data=f"rank_{position}_all"),
-         InlineKeyboardButton("👑 Immortal",  callback_data=f"rank_{position}_immortal")],
-        [InlineKeyboardButton("💠 Divine",    callback_data=f"rank_{position}_divine"),
-         InlineKeyboardButton("🟣 Ancient",   callback_data=f"rank_{position}_ancient")],
-        [InlineKeyboardButton("🔵 Legend",    callback_data=f"rank_{position}_legend"),
-         InlineKeyboardButton("🟠 Archon",    callback_data=f"rank_{position}_archon")],
-        [InlineKeyboardButton("🟡 Crusader",  callback_data=f"rank_{position}_crusader"),
-         InlineKeyboardButton("🟢 Guardian",  callback_data=f"rank_{position}_guardian")],
-        [InlineKeyboardButton("◀️ Назад",     callback_data="back_to_positions")],
+        [InlineKeyboardButton("🌍 Все ранги", callback_data=f"rk_{p}_all"),
+         InlineKeyboardButton("👑 Immortal",  callback_data=f"rk_{p}_immortal")],
+        [InlineKeyboardButton("💠 Divine",    callback_data=f"rk_{p}_divine"),
+         InlineKeyboardButton("🟣 Ancient",   callback_data=f"rk_{p}_ancient")],
+        [InlineKeyboardButton("🔵 Legend",    callback_data=f"rk_{p}_legend"),
+         InlineKeyboardButton("🟠 Archon",    callback_data=f"rk_{p}_archon")],
+        [InlineKeyboardButton("🟡 Crusader",  callback_data=f"rk_{p}_crusader"),
+         InlineKeyboardButton("🟢 Guardian",  callback_data=f"rk_{p}_guardian")],
+        [InlineKeyboardButton("◀️ Назад",     callback_data="menu")],
     ])
 
-def kb_results(position: str, rank: str, cb: str, heroes: list) -> InlineKeyboardMarkup:
-    """Кнопки героев + навигация."""
+def kb_results(position: str, rank: str, heroes: list) -> InlineKeyboardMarkup:
     rows = []
-    # Кнопки героев — по 2 в ряд
     hero_btns = []
     for h in heroes:
-        hid   = h["hero_id"]
         name  = h["localized_name"]
-        label = name if len(name) <= 14 else name[:13] + "…"
-        # callback: build_{hero_id}_{hero_internal_name}_{position}_{rank}_{back_cb}
+        label = name if len(name) <= 15 else name[:14] + "…"
         hero_btns.append(
-            InlineKeyboardButton(f"📖 {label}", callback_data=f"build_{hid}_{position}_{rank}")
+            InlineKeyboardButton(
+                f"📖 {label}",
+                callback_data=f"bd_{h['hero_id']}_{position}_{rank}"
+            )
         )
     for i in range(0, len(hero_btns), 2):
         rows.append(hero_btns[i:i+2])
-
     rows.append([
-        InlineKeyboardButton("🔄 Обновить",    callback_data=cb),
+        InlineKeyboardButton("🔄 Обновить",     callback_data=f"rk_{position}_{rank}"),
         InlineKeyboardButton("◀️ Сменить ранг", callback_data=f"pos_{position}"),
     ])
-    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_positions")])
+    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="menu")])
     return InlineKeyboardMarkup(rows)
 
 def kb_build_back(position: str, rank: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("◀️ Назад к топу", callback_data=f"rank_{position}_{rank}"),
-        InlineKeyboardButton("🏠 Меню",         callback_data="back_to_positions"),
+        InlineKeyboardButton("◀️ Назад к топу", callback_data=f"rk_{position}_{rank}"),
+        InlineKeyboardButton("🏠 Меню",         callback_data="menu"),
     ]])
 
 # ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -98,7 +97,6 @@ async def meta_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "ℹ️ <b>Как пользоваться:</b>\n\n"
-        "/start или /meta — открыть бота\n\n"
         "1️⃣ Выбери позицию\n"
         "2️⃣ Выбери ранг\n"
         "3️⃣ Смотри топ-10 героев\n"
@@ -106,8 +104,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>В билде:</b>\n"
         "🛍 Стартовые айтемы\n"
         "⚔️ Корневые айтемы (core)\n"
-        "💎 Поздние айтемы (late game)\n"
-        "🎯 Скиллбилд (первые 7 уровней)\n\n"
+        "💎 Поздние айтемы\n"
+        "🎯 Скиллбилд (уровни 1–7)\n\n"
         "Данные: OpenDota API • Кэш: 30 мин",
         parse_mode="HTML",
     )
@@ -115,78 +113,78 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
+    data  = query.data
+    logger.info(f"Callback: {data!r}")
 
-    # Главное меню
-    if data == "back_to_positions":
+    # ── Главное меню
+    if data == "menu":
         await query.edit_message_text(
             "🎮 <b>Выбери позицию:</b>", parse_mode="HTML", reply_markup=kb_positions()
         )
         return
 
-    # Выбор позиции
-    if data.startswith("pos_") and not data.startswith("pos_") or data.startswith("pos_"):
-        if data.startswith("pos_") and len(data) == 5:
-            position = data[4:]
-            await query.edit_message_text(
-                f"{POSITION_EMOJIS[position]} <b>{POSITION_NAMES[position]} (Pos {position})</b>\n\n"
-                "Выбери ранг 👇",
-                parse_mode="HTML", reply_markup=kb_ranks(position),
-            )
-            return
+    # ── Выбор позиции  →  "pos_1" .. "pos_5"
+    if data.startswith("pos_"):
+        position = data[4:]  # "1".."5"
+        await query.edit_message_text(
+            f"{POSITION_EMOJIS[position]} <b>{POSITION_NAMES[position]} (Pos {position})</b>\n\n"
+            "Выбери ранг 👇",
+            parse_mode="HTML", reply_markup=kb_ranks(position),
+        )
+        return
 
-    # Выбор ранга → показать топ
-    if data.startswith("rank_"):
-        _, position, rank = data.split("_", 2)
+    # ── Выбор ранга  →  "rk_1_immortal", "rk_2_all", etc.
+    if data.startswith("rk_"):
+        _, position, rank = data.split("_", 2)  # rk | 1 | immortal
         await query.edit_message_text(
             f"{POSITION_EMOJIS[position]} <b>{POSITION_NAMES[position]}</b>  |  "
             f"{RANK_EMOJIS.get(rank,'🌍')} <b>{RANK_NAMES.get(rank, rank)}</b>\n\n"
-            "⏳ Загружаю данные...",
+            "⏳ Загружаю данные из OpenDota...",
             parse_mode="HTML",
         )
         try:
             heroes = await get_top_heroes(position, rank)
             text   = _format_top(heroes, position, rank)
-            kb     = kb_results(position, rank, data, heroes)
+            kb     = kb_results(position, rank, heroes)
         except Exception as e:
-            logger.error(f"get_top_heroes error: {e}", exc_info=True)
-            text = f"❌ Ошибка: <code>{str(e)[:200]}</code>"
-            kb   = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔄 Повторить",  callback_data=data),
-                InlineKeyboardButton("🏠 Меню",       callback_data="back_to_positions"),
+            logger.error(f"get_top_heroes: {e}", exc_info=True)
+            text = (
+                f"❌ <b>Ошибка загрузки данных:</b>\n"
+                f"<code>{str(e)[:300]}</code>"
+            )
+            kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔄 Повторить", callback_data=data),
+                InlineKeyboardButton("🏠 Меню",      callback_data="menu"),
             ]])
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
         return
 
-    # Билд героя
-    if data.startswith("build_"):
-        # build_{hero_id}_{position}_{rank}
-        parts    = data.split("_", 3)
-        hero_id  = int(parts[1])
-        position = parts[2]
-        rank     = parts[3]
+    # ── Билд героя  →  "bd_{hero_id}_{position}_{rank}"
+    if data.startswith("bd_"):
+        _, hid_str, position, rank = data.split("_", 3)
+        hero_id = int(hid_str)
 
         await query.edit_message_text("⏳ Загружаю билд...", parse_mode="HTML")
-
         try:
-            # Получаем имя героя из кэша топа
-            heroes   = await get_top_heroes(position, rank)
-            hero     = next((h for h in heroes if h["hero_id"] == hero_id), None)
+            heroes    = await get_top_heroes(position, rank)
+            hero      = next((h for h in heroes if h["hero_id"] == hero_id), None)
             hero_name = hero["localized_name"] if hero else f"Hero #{hero_id}"
-
-            # Внутреннее имя для API (antimage, crystal_maiden и т.д.)
-            internal = _internal_name(hero_id)
-            build    = await get_hero_build(hero_id, internal)
-            text     = _format_build(hero_name, build, position, rank)
+            internal  = _internal_name(hero_id)
+            build     = await get_hero_build(hero_id, internal)
+            text      = _format_build(hero_name, build, position, rank)
         except Exception as e:
-            logger.error(f"get_hero_build error: {e}", exc_info=True)
-            text = f"❌ Ошибка загрузки билда: <code>{str(e)[:200]}</code>"
-
+            logger.error(f"get_hero_build: {e}", exc_info=True)
+            text = (
+                f"❌ <b>Ошибка загрузки билда:</b>\n"
+                f"<code>{str(e)[:300]}</code>"
+            )
         await query.edit_message_text(
             text, parse_mode="HTML",
             reply_markup=kb_build_back(position, rank),
         )
         return
+
+    logger.warning(f"Неизвестный callback: {data!r}")
 
 # ─── Formatting ───────────────────────────────────────────────────────────────
 
@@ -198,9 +196,8 @@ def _wr_bar(wr: float) -> str:
     return "📉"
 
 def _format_top(heroes: list, position: str, rank: str) -> str:
-    pos_e = POSITION_EMOJIS[position]
     lines = [
-        f"{pos_e} <b>Топ героев — {POSITION_NAMES[position]} (Pos {position})</b>",
+        f"{POSITION_EMOJIS[position]} <b>Топ героев — {POSITION_NAMES[position]} (Pos {position})</b>",
         f"{RANK_EMOJIS.get(rank,'🌍')} Ранг: <b>{RANK_NAMES.get(rank, rank)}</b>",
         "━━━━━━━━━━━━━━━━━━━━",
     ]
@@ -218,42 +215,33 @@ def _format_top(heroes: list, position: str, rank: str) -> str:
     return "\n".join(lines)
 
 def _format_build(hero_name: str, build: dict, position: str, rank: str) -> str:
-    pos_e = POSITION_EMOJIS[position]
-    rk_e  = RANK_EMOJIS.get(rank, "🌍")
-    rk_n  = RANK_NAMES.get(rank, rank)
-
-    def items_line(items: list) -> str:
+    def fmt(items: list) -> str:
         return " • ".join(items) if items else "—"
 
     lines = [
         f"📖 <b>Билд — {hero_name}</b>",
-        f"{pos_e} {POSITION_NAMES[position]}  |  {rk_e} {rk_n}",
+        f"{POSITION_EMOJIS[position]} {POSITION_NAMES[position]}  |  "
+        f"{RANK_EMOJIS.get(rank,'🌍')} {RANK_NAMES.get(rank, rank)}",
         "━━━━━━━━━━━━━━━━━━━━",
         "",
         "🛍 <b>Стартовые айтемы:</b>",
-        items_line(build.get("starting_items", [])),
+        fmt(build.get("starting_items", [])),
         "",
         "⚔️ <b>Корневые айтемы (core):</b>",
-        items_line(build.get("core_items", [])),
+        fmt(build.get("core_items", [])),
         "",
         "💎 <b>Поздние айтемы:</b>",
-        items_line(build.get("late_items", [])),
+        fmt(build.get("late_items", [])),
         "",
         "🎯 <b>Скиллбилд (уровни 1–7):</b>",
-    ]
-    for ab in build.get("abilities", []):
-        lines.append(f"  {ab}")
-
-    lines += [
+        *build.get("abilities", ["—"]),
         "",
         "━━━━━━━━━━━━━━━━━━━━",
-        "🕐 <i>Данные: OpenDota API (реальные матчи)</i>",
+        "🕐 <i>Данные: OpenDota API</i>",
     ]
     return "\n".join(lines)
 
 def _internal_name(hero_id: int) -> str:
-    """hero_id → internal name для API (npc_dota_hero_{name} → берём {name})."""
-    # Таблица id → internal name (нужна для hero_abilities константы)
     TABLE = {
         1:"antimage",2:"axe",3:"bane",4:"bloodseeker",5:"crystal_maiden",
         6:"drow_ranger",7:"earthshaker",8:"juggernaut",9:"mirana",10:"morphling",
