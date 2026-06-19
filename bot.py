@@ -2,12 +2,10 @@ import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    ContextTypes,
+    Application, CommandHandler, CallbackQueryHandler, ContextTypes,
 )
 from dotabuff import get_top_heroes
+from builds import get_hero_build
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -15,265 +13,290 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-POSITION_NAMES = {
-    "1": "Carry",
-    "2": "Mid",
-    "3": "Offlane",
-    "4": "Soft Support",
-    "5": "Hard Support",
+POSITION_NAMES  = {"1":"Carry","2":"Mid","3":"Offlane","4":"Soft Support","5":"Hard Support"}
+POSITION_EMOJIS = {"1":"⚔️","2":"🔮","3":"🛡️","4":"🎯","5":"💚"}
+RANK_NAMES  = {
+    "herald":"Herald","guardian":"Guardian","crusader":"Crusader","archon":"Archon",
+    "legend":"Legend","ancient":"Ancient","divine":"Divine","immortal":"Immortal","all":"Все ранги",
 }
-
-POSITION_EMOJIS = {
-    "1": "⚔️",
-    "2": "🔮",
-    "3": "🛡️",
-    "4": "🎯",
-    "5": "💚",
-}
-
-RANK_NAMES = {
-    "herald":   "Herald",
-    "guardian": "Guardian",
-    "crusader": "Crusader",
-    "archon":   "Archon",
-    "legend":   "Legend",
-    "ancient":  "Ancient",
-    "divine":   "Divine",
-    "immortal": "Immortal",
-    "all":      "Все ранги",
-}
-
 RANK_EMOJIS = {
-    "herald":   "⚪",
-    "guardian": "🟢",
-    "crusader": "🟡",
-    "archon":   "🟠",
-    "legend":   "🔵",
-    "ancient":  "🟣",
-    "divine":   "💠",
-    "immortal": "👑",
-    "all":      "🌍",
+    "herald":"⚪","guardian":"🟢","crusader":"🟡","archon":"🟠",
+    "legend":"🔵","ancient":"🟣","divine":"💠","immortal":"👑","all":"🌍",
 }
-
+MEDALS = ["🥇","🥈","🥉","4.","5.","6.","7.","8.","9.","🔟"]
 
 # ─── Keyboards ────────────────────────────────────────────────────────────────
 
-def build_position_keyboard() -> InlineKeyboardMarkup:
+def kb_positions() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("⚔️ Carry (1)", callback_data="pos_1"),
-            InlineKeyboardButton("🔮 Mid (2)",   callback_data="pos_2"),
-        ],
-        [
-            InlineKeyboardButton("🛡️ Offlane (3)",    callback_data="pos_3"),
-            InlineKeyboardButton("🎯 Soft Sup (4)", callback_data="pos_4"),
-        ],
-        [
-            InlineKeyboardButton("💚 Hard Sup (5)", callback_data="pos_5"),
-        ],
+        [InlineKeyboardButton("⚔️ Carry (1)", callback_data="pos_1"),
+         InlineKeyboardButton("🔮 Mid (2)",   callback_data="pos_2")],
+        [InlineKeyboardButton("🛡️ Offlane (3)",  callback_data="pos_3"),
+         InlineKeyboardButton("🎯 Soft Sup (4)", callback_data="pos_4")],
+        [InlineKeyboardButton("💚 Hard Sup (5)", callback_data="pos_5")],
     ])
 
-
-def build_rank_keyboard(position: str) -> InlineKeyboardMarkup:
+def kb_ranks(position: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🌍 Все ранги",  callback_data=f"rank_{position}_all"),
-            InlineKeyboardButton("👑 Immortal",   callback_data=f"rank_{position}_immortal"),
-        ],
-        [
-            InlineKeyboardButton("💠 Divine",     callback_data=f"rank_{position}_divine"),
-            InlineKeyboardButton("🟣 Ancient",    callback_data=f"rank_{position}_ancient"),
-        ],
-        [
-            InlineKeyboardButton("🔵 Legend",     callback_data=f"rank_{position}_legend"),
-            InlineKeyboardButton("🟠 Archon",     callback_data=f"rank_{position}_archon"),
-        ],
-        [
-            InlineKeyboardButton("🟡 Crusader",   callback_data=f"rank_{position}_crusader"),
-            InlineKeyboardButton("🟢 Guardian",   callback_data=f"rank_{position}_guardian"),
-        ],
-        [
-            InlineKeyboardButton("◀️ Назад к позициям", callback_data="back_to_positions"),
-        ],
+        [InlineKeyboardButton("🌍 Все ранги", callback_data=f"rank_{position}_all"),
+         InlineKeyboardButton("👑 Immortal",  callback_data=f"rank_{position}_immortal")],
+        [InlineKeyboardButton("💠 Divine",    callback_data=f"rank_{position}_divine"),
+         InlineKeyboardButton("🟣 Ancient",   callback_data=f"rank_{position}_ancient")],
+        [InlineKeyboardButton("🔵 Legend",    callback_data=f"rank_{position}_legend"),
+         InlineKeyboardButton("🟠 Archon",    callback_data=f"rank_{position}_archon")],
+        [InlineKeyboardButton("🟡 Crusader",  callback_data=f"rank_{position}_crusader"),
+         InlineKeyboardButton("🟢 Guardian",  callback_data=f"rank_{position}_guardian")],
+        [InlineKeyboardButton("◀️ Назад",     callback_data="back_to_positions")],
     ])
 
+def kb_results(position: str, rank: str, cb: str, heroes: list) -> InlineKeyboardMarkup:
+    """Кнопки героев + навигация."""
+    rows = []
+    # Кнопки героев — по 2 в ряд
+    hero_btns = []
+    for h in heroes:
+        hid   = h["hero_id"]
+        name  = h["localized_name"]
+        label = name if len(name) <= 14 else name[:13] + "…"
+        # callback: build_{hero_id}_{hero_internal_name}_{position}_{rank}_{back_cb}
+        hero_btns.append(
+            InlineKeyboardButton(f"📖 {label}", callback_data=f"build_{hid}_{position}_{rank}")
+        )
+    for i in range(0, len(hero_btns), 2):
+        rows.append(hero_btns[i:i+2])
 
-def build_result_keyboard(position: str, rank: str, cb_data: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔄 Обновить",         callback_data=cb_data),
-            InlineKeyboardButton("◀️ Сменить ранг",     callback_data=f"pos_{position}"),
-        ],
-        [
-            InlineKeyboardButton("🏠 Главное меню",      callback_data="back_to_positions"),
-        ],
+    rows.append([
+        InlineKeyboardButton("🔄 Обновить",    callback_data=cb),
+        InlineKeyboardButton("◀️ Сменить ранг", callback_data=f"pos_{position}"),
     ])
+    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_to_positions")])
+    return InlineKeyboardMarkup(rows)
 
+def kb_build_back(position: str, rank: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("◀️ Назад к топу", callback_data=f"rank_{position}_{rank}"),
+        InlineKeyboardButton("🏠 Меню",         callback_data="back_to_positions"),
+    ]])
 
 # ─── Handlers ─────────────────────────────────────────────────────────────────
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.effective_user.first_name
-    text = (
+    await update.message.reply_text(
         f"👋 Привет, <b>{name}</b>!\n\n"
         "🎮 <b>Dota 2 Meta Bot</b>\n"
-        "Показываю топ-10 героев по позиции с актуальным winrate и pickrate.\n\n"
-        "Данные берутся из <b>OpenDota</b> в реальном времени.\n\n"
-        "Выбери свою позицию 👇"
+        "Топ-10 героев по позиции + билды из реальных матчей.\n\n"
+        "Выбери свою позицию 👇",
+        parse_mode="HTML", reply_markup=kb_positions(),
     )
-    await update.message.reply_text(text, parse_mode="HTML",
-                                    reply_markup=build_position_keyboard())
 
-
-async def meta_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def meta_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🎮 <b>Выбери позицию:</b>",
-        parse_mode="HTML",
-        reply_markup=build_position_keyboard(),
+        "🎮 <b>Выбери позицию:</b>", parse_mode="HTML", reply_markup=kb_positions()
     )
 
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    text = (
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "ℹ️ <b>Как пользоваться:</b>\n\n"
         "/start или /meta — открыть бота\n\n"
-        "<b>Шаги:</b>\n"
-        "1️⃣ Выбери позицию (1–5)\n"
+        "1️⃣ Выбери позицию\n"
         "2️⃣ Выбери ранг\n"
-        "3️⃣ Получи топ-10 героев!\n\n"
-        "<b>Что показывает бот:</b>\n"
-        "📈 Winrate — % побед на этой позиции\n"
-        "🎯 Pickrate — % от всех пиков в ранге\n"
-        "🔥 Индикатор силы героя\n\n"
-        "Данные: OpenDota API • Кэш: 30 мин"
+        "3️⃣ Смотри топ-10 героев\n"
+        "4️⃣ Нажми на героя → получи билд!\n\n"
+        "<b>В билде:</b>\n"
+        "🛍 Стартовые айтемы\n"
+        "⚔️ Корневые айтемы (core)\n"
+        "💎 Поздние айтемы (late game)\n"
+        "🎯 Скиллбилд (первые 7 уровней)\n\n"
+        "Данные: OpenDota API • Кэш: 30 мин",
+        parse_mode="HTML",
     )
-    await update.message.reply_text(text, parse_mode="HTML")
 
-
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
 
-    # ── Main menu
+    # Главное меню
     if data == "back_to_positions":
         await query.edit_message_text(
-            "🎮 <b>Выбери позицию:</b>",
-            parse_mode="HTML",
-            reply_markup=build_position_keyboard(),
+            "🎮 <b>Выбери позицию:</b>", parse_mode="HTML", reply_markup=kb_positions()
         )
         return
 
-    # ── Position selected → show rank picker
-    if data.startswith("pos_"):
-        position = data[4:]
-        emoji = POSITION_EMOJIS[position]
-        name  = POSITION_NAMES[position]
-        await query.edit_message_text(
-            f"{emoji} <b>{name} (Pos {position})</b>\n\nВыбери ранг 👇",
-            parse_mode="HTML",
-            reply_markup=build_rank_keyboard(position),
-        )
-        return
+    # Выбор позиции
+    if data.startswith("pos_") and not data.startswith("pos_") or data.startswith("pos_"):
+        if data.startswith("pos_") and len(data) == 5:
+            position = data[4:]
+            await query.edit_message_text(
+                f"{POSITION_EMOJIS[position]} <b>{POSITION_NAMES[position]} (Pos {position})</b>\n\n"
+                "Выбери ранг 👇",
+                parse_mode="HTML", reply_markup=kb_ranks(position),
+            )
+            return
 
-    # ── Rank selected → fetch and show heroes
+    # Выбор ранга → показать топ
     if data.startswith("rank_"):
         _, position, rank = data.split("_", 2)
-        pos_emoji   = POSITION_EMOJIS[position]
-        pos_name    = POSITION_NAMES[position]
-        rank_emoji  = RANK_EMOJIS.get(rank, "🌍")
-        rank_name   = RANK_NAMES.get(rank, rank.capitalize())
-
-        # Show loading
         await query.edit_message_text(
-            f"{pos_emoji} <b>{pos_name}</b>  |  {rank_emoji} <b>{rank_name}</b>\n\n"
-            "⏳ Загружаю данные из OpenDota...",
+            f"{POSITION_EMOJIS[position]} <b>{POSITION_NAMES[position]}</b>  |  "
+            f"{RANK_EMOJIS.get(rank,'🌍')} <b>{RANK_NAMES.get(rank, rank)}</b>\n\n"
+            "⏳ Загружаю данные...",
             parse_mode="HTML",
         )
-
         try:
             heroes = await get_top_heroes(position, rank)
-            text = format_response(heroes, position, rank)
+            text   = _format_top(heroes, position, rank)
+            kb     = kb_results(position, rank, data, heroes)
         except Exception as e:
-            import traceback
-            err_detail = traceback.format_exc()
-            logger.error(f"Ошибка получения данных:\n{err_detail}")
-            # Показываем полную ошибку прямо в боте для отладки
-            short = str(e)[:300]
-            text = (
-                f"❌ <b>Ошибка (debug):</b>\n"
-                f"<code>{short}</code>\n\n"
-                f"Тип: <code>{type(e).__name__}</code>"
-            )
+            logger.error(f"get_top_heroes error: {e}", exc_info=True)
+            text = f"❌ Ошибка: <code>{str(e)[:200]}</code>"
+            kb   = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🔄 Повторить",  callback_data=data),
+                InlineKeyboardButton("🏠 Меню",       callback_data="back_to_positions"),
+            ]])
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+        return
+
+    # Билд героя
+    if data.startswith("build_"):
+        # build_{hero_id}_{position}_{rank}
+        parts    = data.split("_", 3)
+        hero_id  = int(parts[1])
+        position = parts[2]
+        rank     = parts[3]
+
+        await query.edit_message_text("⏳ Загружаю билд...", parse_mode="HTML")
+
+        try:
+            # Получаем имя героя из кэша топа
+            heroes   = await get_top_heroes(position, rank)
+            hero     = next((h for h in heroes if h["hero_id"] == hero_id), None)
+            hero_name = hero["localized_name"] if hero else f"Hero #{hero_id}"
+
+            # Внутреннее имя для API (antimage, crystal_maiden и т.д.)
+            internal = _internal_name(hero_id)
+            build    = await get_hero_build(hero_id, internal)
+            text     = _format_build(hero_name, build, position, rank)
+        except Exception as e:
+            logger.error(f"get_hero_build error: {e}", exc_info=True)
+            text = f"❌ Ошибка загрузки билда: <code>{str(e)[:200]}</code>"
 
         await query.edit_message_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=build_result_keyboard(position, rank, data),
+            text, parse_mode="HTML",
+            reply_markup=kb_build_back(position, rank),
         )
-
+        return
 
 # ─── Formatting ───────────────────────────────────────────────────────────────
 
-MEDALS = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "🔟"]
-
-def wr_bar(winrate: float) -> str:
-    if winrate >= 57:  return "🔥🔥🔥"
-    if winrate >= 54:  return "🔥🔥"
-    if winrate >= 51:  return "🔥"
-    if winrate >= 49:  return "⚖️"
+def _wr_bar(wr: float) -> str:
+    if wr >= 57: return "🔥🔥🔥"
+    if wr >= 54: return "🔥🔥"
+    if wr >= 51: return "🔥"
+    if wr >= 49: return "⚖️"
     return "📉"
 
-def format_response(heroes: list, position: str, rank: str) -> str:
-    pos_emoji  = POSITION_EMOJIS[position]
-    pos_name   = POSITION_NAMES[position]
-    rank_emoji = RANK_EMOJIS.get(rank, "🌍")
-    rank_name  = RANK_NAMES.get(rank, rank.capitalize())
-
+def _format_top(heroes: list, position: str, rank: str) -> str:
+    pos_e = POSITION_EMOJIS[position]
     lines = [
-        f"{pos_emoji} <b>Топ героев — {pos_name} (Pos {position})</b>",
-        f"{rank_emoji} Ранг: <b>{rank_name}</b>",
+        f"{pos_e} <b>Топ героев — {POSITION_NAMES[position]} (Pos {position})</b>",
+        f"{RANK_EMOJIS.get(rank,'🌍')} Ранг: <b>{RANK_NAMES.get(rank, rank)}</b>",
         "━━━━━━━━━━━━━━━━━━━━",
     ]
-
-    if not heroes:
-        lines.append("😔 Данных недостаточно для этого фильтра.")
-    else:
-        for i, h in enumerate(heroes):
-            medal    = MEDALS[i] if i < len(MEDALS) else f"{i+1}."
-            name     = h["localized_name"]
-            winrate  = h["winrate"]
-            pickrate = h.get("pickrate", 0)
-            bar      = wr_bar(winrate)
-
-            lines.append(
-                f"{medal} <b>{name}</b>\n"
-                f"   📈 WR: <b>{winrate:.1f}%</b> {bar}   🎯 Pick: {pickrate:.1f}%"
-            )
-
+    for i, h in enumerate(heroes):
+        medal = MEDALS[i] if i < len(MEDALS) else f"{i+1}."
+        lines.append(
+            f"{medal} <b>{h['localized_name']}</b>\n"
+            f"   📈 WR: <b>{h['winrate']:.1f}%</b> {_wr_bar(h['winrate'])}   "
+            f"🎯 Pick: {h.get('pickrate',0):.1f}%"
+        )
     lines += [
         "━━━━━━━━━━━━━━━━━━━━",
-        "🕐 <i>Источник: OpenDota API</i>",
+        "📖 <i>Нажми на героя ниже чтобы посмотреть билд</i>",
     ]
     return "\n".join(lines)
 
+def _format_build(hero_name: str, build: dict, position: str, rank: str) -> str:
+    pos_e = POSITION_EMOJIS[position]
+    rk_e  = RANK_EMOJIS.get(rank, "🌍")
+    rk_n  = RANK_NAMES.get(rank, rank)
+
+    def items_line(items: list) -> str:
+        return " • ".join(items) if items else "—"
+
+    lines = [
+        f"📖 <b>Билд — {hero_name}</b>",
+        f"{pos_e} {POSITION_NAMES[position]}  |  {rk_e} {rk_n}",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "🛍 <b>Стартовые айтемы:</b>",
+        items_line(build.get("starting_items", [])),
+        "",
+        "⚔️ <b>Корневые айтемы (core):</b>",
+        items_line(build.get("core_items", [])),
+        "",
+        "💎 <b>Поздние айтемы:</b>",
+        items_line(build.get("late_items", [])),
+        "",
+        "🎯 <b>Скиллбилд (уровни 1–7):</b>",
+    ]
+    for ab in build.get("abilities", []):
+        lines.append(f"  {ab}")
+
+    lines += [
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "🕐 <i>Данные: OpenDota API (реальные матчи)</i>",
+    ]
+    return "\n".join(lines)
+
+def _internal_name(hero_id: int) -> str:
+    """hero_id → internal name для API (npc_dota_hero_{name} → берём {name})."""
+    # Таблица id → internal name (нужна для hero_abilities константы)
+    TABLE = {
+        1:"antimage",2:"axe",3:"bane",4:"bloodseeker",5:"crystal_maiden",
+        6:"drow_ranger",7:"earthshaker",8:"juggernaut",9:"mirana",10:"morphling",
+        11:"nevermore",12:"phantom_lancer",13:"puck",14:"pudge",15:"razor",
+        16:"sand_king",17:"storm_spirit",18:"sven",19:"tiny",20:"witch_doctor",
+        21:"lich",22:"zuus",23:"kunkka",25:"lina",26:"lion",27:"shadow_shaman",
+        28:"slardar",29:"tidehunter",32:"riki",33:"enigma",34:"tinker",
+        35:"sniper",36:"necrolyte",37:"warlock",38:"beastmaster",39:"queenofpain",
+        40:"venomancer",41:"faceless_void",42:"skeleton_king",44:"phantom_assassin",
+        45:"pugna",46:"templar_assassin",47:"viper",48:"luna",49:"dragon_knight",
+        50:"dazzle",51:"rattletrap",52:"leshrac",53:"furion",54:"life_stealer",
+        55:"dark_seer",56:"clinkz",57:"omniknight",58:"enchantress",59:"huskar",
+        60:"night_stalker",61:"broodmother",62:"bounty_hunter",63:"weaver",
+        64:"jakiro",65:"batrider",66:"chen",67:"spectre",68:"ancient_apparition",
+        69:"doom_bringer",70:"ursa",71:"spirit_breaker",72:"gyrocopter",
+        73:"alchemist",74:"invoker",75:"silencer",76:"obsidian_destroyer",
+        77:"lycan",78:"brewmaster",79:"shadow_demon",80:"lone_druid",
+        81:"chaos_knight",82:"meepo",83:"treant",84:"ogre_magi",85:"undying",
+        86:"rubick",87:"disruptor",88:"nyx_assassin",89:"naga_siren",
+        90:"keeper_of_the_light",91:"wisp",92:"visage",93:"slark",94:"medusa",
+        95:"troll_warlord",96:"centaur",97:"magnataur",98:"shredder",
+        99:"bristleback",100:"tusk",101:"skywrath_mage",102:"abaddon",
+        103:"elder_titan",104:"legion_commander",105:"techies",106:"ember_spirit",
+        107:"earth_spirit",108:"terrorblade",109:"phoenix",110:"oracle",
+        111:"winter_wyvern",112:"arc_warden",113:"monkey_king",114:"dark_willow",
+        119:"grimstroke",120:"void_spirit",121:"snapfire",123:"hoodwink",
+        126:"primal_beast",129:"marci",135:"muerta",
+    }
+    return TABLE.get(hero_id, f"hero_{hero_id}")
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
-def main() -> None:
+def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
-        raise ValueError("Задай переменную окружения TELEGRAM_BOT_TOKEN")
-
+        raise ValueError("TELEGRAM_BOT_TOKEN не задан!")
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("meta",  meta_command))
     app.add_handler(CommandHandler("help",  help_command))
     app.add_handler(CallbackQueryHandler(handle_callback))
-
     logger.info("Бот запущен ✅")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
